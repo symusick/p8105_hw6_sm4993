@@ -1,0 +1,140 @@
+---
+title: "P8105: HW6"
+author: "Sydney Musick"
+output: github_document
+---
+
+# Problem 1
+
+## Loading packages
+```{r 1}
+library(tidyverse)
+library(modelr)
+```
+
+## Loading data and clean data
+```{r 2}
+birthweight = 
+  read_csv("birthweight.csv") %>% 
+    janitor::clean_names() %>% 
+    mutate(babysex = factor(babysex, levels = c(1,2), labels = c("Male", "Female"))) %>%
+    mutate(frace = factor(frace, levels = c(1,2,3,4,8,9), labels = c("White", "Black",
+      "Asian", "Puerto Rican", "Other", "Unknown"))) %>%
+    mutate(mrace = factor(mrace, levels = c(1,2,3,4,8,9), labels = c("White", "Black",
+      "Asian", "Puerto Rican", "Other", "Unknown"))) %>%
+    mutate(malform = factor(malform, levels = c(0,1), labels = c("Absent", "Present")))
+```
+Appropriate numeric variables converted to factor variables.
+
+## Check for missing values
+```{r 3}
+colSums(is.na(birthweight))
+```
+No missing values.
+
+## Regression model building
+
+To build my model, I will include all clinically relevant variables as predictors based on current literature. I will then remove the variables that are not significant predictors of birthweight in subsequent models. 
+
+From a brief review of online literature, it appears that gestational age, sex, maternal height, maternal weight, maternal weight gain, previous births, smoking status, head circumference, maternal race, paternal race, and malformations have all been predictors of birthweight in previous studies. Therefore, for the first model I will include variables `gaweeks`, `babysex`, `mheight`, `ppwt`, `wtgain`, `parity`, `smoken`, `bhead`, `mrace`, `frace`, `malform`.
+
+### Model 1
+```{r 4}
+model1 = lm(bwt ~ gaweeks + babysex + mheight + ppwt + wtgain + parity + smoken + bhead + mrace + frace + malform, data = birthweight)
+
+summary(model1)
+
+model1 %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 2)
+```
+
+The significant predictors in this model were gestational age, sex, maternal height, maternal weight, maternal weight gain, smoking status, head circumference, and maternal race - Black. Previous births, maternal race - Asian or Puerto Rican, paternal race - Black, Asian, Puerto Rican, or Other, and malformations were not significant predictors of birthweight. 
+
+I will remove the nonsignificant variables from the model for Model 2. Note: I am chosing to include `mrace` because maternal race was a significant preditor of birthweight for black mothers.
+
+### Model 2
+```{r 5}
+model2 = lm(bwt ~ gaweeks + babysex + mheight + ppwt + wtgain + smoken + bhead + mrace, data = birthweight)
+
+summary(model2)
+
+model2 %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 2)
+```
+
+All predictors in the model are now significant, except the race of Asian mothers. 
+
+## Plotting model residuals against fitted values
+```{r 6}
+birthweight %>% 
+  modelr::add_predictions(model2) %>%
+  modelr::add_residuals(model2) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.3) +
+  labs(x = "Fitted Values", y = "Residuals") + 
+  ggtitle("Model 2: Residuals vs. Fitted Values") 
+```
+
+## Model using length at birth and gestational age as predictors (main effects only)
+```{r 7}
+maineffects_model = lm(bwt ~ blength + gaweeks, data = birthweight)
+
+summary(maineffects_model)
+
+maineffects_model %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 2)
+```
+
+## Model using head circumference, length, sex, and all interactions (including the three-way interaction)
+```{r 8}
+interaction_model = lm(bwt ~ blength * bhead * babysex, data = birthweight)
+
+summary(interaction_model)
+
+interaction_model %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 2)
+```
+
+## Compare Model 2 to the Main Effects Model and the Interaction Model
+```{r 9}
+crossv = 
+  crossv_mc(birthweight, 50) %>% 
+  mutate(train = map(train, as_tibble), test = map(test, as_tibble))
+
+crossv = crossv %>% 
+  mutate(
+    model2 = map(train, ~lm(bwt ~ gaweeks + babysex + mheight + ppwt + wtgain + smoken + bhead + mrace, data = .x)),
+    maineffects_model = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    interaction_model = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))) %>% 
+  mutate(
+    rmse_model2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y)),
+    rmse_maineffects = map2_dbl(maineffects_model, test, ~rmse(model = .x, data = .y)),
+    rmse_interaction = map2_dbl(interaction_model, test, ~rmse(model = .x, data = .y))) %>%
+  select(starts_with("rmse")) %>%  
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) 
+
+ggplot(crossv, aes(x = model, y = rmse)) +
+geom_boxplot() +
+labs(x = "Model", y = "RMSE") +
+ggtitle("RMSE for Model 2 + Main Effects Model + Interaction Model") 
+```
+
+Looking at the plot, we can see that the best fitting model is the model with the interaction terms because it has the lowest RMSE. The worst fitting model is the Main Effects Model because it has the highest RMSE. My model (Model 2) has a better fit than the Main Effects Model, but a worse fit than the Interaction Model.
+
+
+
+
+
+
+
+
+
