@@ -130,7 +130,79 @@ ggtitle("RMSE for Model 2 + Main Effects Model + Interaction Model")
 
 Looking at the plot, we can see that the best fitting model is the model with the interaction terms because it has the lowest RMSE. The worst fitting model is the Main Effects Model because it has the highest RMSE. My model (Model 2) has a better fit than the Main Effects Model, but a worse fit than the Interaction Model.
 
+# Problem 2
 
+## Loading the data
+```{r 10}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+## Producing r^2 and log(B0*B1) estimates
+```{r 11}
+weather = weather_df %>% 
+  bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~tmin, data = .x)),
+    glance = map(models, broom::glance),
+    results = map(models, broom::tidy)) %>%
+  unnest(results) %>% 
+  unnest(glance, names_repair = "universal") %>% 
+  select(strap, models, .id, r.squared, term, estimate)
+
+weather_estimates = weather %>% 
+  mutate(term = if_else(term == "tmin", "tmin", "intercept")) %>% 
+  pivot_wider(
+    names_from = "term",
+    values_from = "estimate") %>% 
+  mutate(log_b0b1 = log(intercept) + log(tmin))
+```
+
+## Plotting the r^2 values
+```{r 12}
+ggplot(weather_estimates, aes(x = r.squared)) + 
+geom_density() +
+labs(x = "R Squared", y = "Density") +
+ggtitle("R Squared Distribution for 5,000 Bootstrap Samples")
+```
+
+## Plotting the log(B0*B1) values
+```{r 13}
+ggplot(weather_estimates, aes(x = log_b0b1)) + 
+geom_density() +
+labs(x = "Log(B0*B1)", y = "Density") +
+ggtitle("Log(B0*B1) Distribution for 5,000 Bootstrap Samples") 
+```
+
+The R Squared and Log(B0*B1) plots are both normally distributed. The plot of R squared has a midpoint value of about 0.91, while the Log(B0xB1) plot is centered around about 2.02.
+
+# Finding the 95% confidence intervals
+```{r 14}
+rsquared_ci = weather_estimates %>%
+  summarize(
+    r_squared_lower = quantile(r.squared, c(.025)),
+    r_squared_upper = quantile(r.squared, c(.975)))
+
+knitr::kable( rsquared_ci)
+
+betas_ci = weather_estimates %>%
+  summarize(
+    logb0b1_lower = quantile(log_b0b1, c(.025)),
+    logb0b1_upper = quantile(log_b0b1, c(.975)))
+
+knitr::kable(betas_ci)
+```
+
+The 95% confidence interval for R-Squared is (0.89, 0.93). The 95% confidence interval for log(B0*B1) is (1.97, 2.06).
 
 
 
